@@ -77,6 +77,33 @@ export default function TransactionsPage() {
     };
   }, [filteredTransactions]);
 
+  const exportCsv = () => {
+    if (filteredTransactions.length === 0) {
+      return;
+    }
+
+    const escapeCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const rows = [
+      ["Title", "Category", "Type", "Amount", "Date"],
+      ...filteredTransactions.map((transaction) => [
+        transaction.title,
+        transaction.category,
+        transaction.type,
+        transaction.amount.toFixed(2),
+        formatDate(transaction.date),
+      ]),
+    ];
+
+    const csv = rows.map((row) => row.map((cell) => escapeCell(cell)).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `transactions-${new Date().toISOString().split("T")[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const onCreated = (createdTransactions: Transaction[]) => {
     setTransactions((current) => [...createdTransactions, ...current]);
   };
@@ -143,13 +170,23 @@ export default function TransactionsPage() {
           <section className="rounded-2xl border border-line bg-surface/90 p-5 shadow-glow">
             <div className="mb-4 flex items-center justify-between gap-2">
               <h2 className="font-[var(--font-heading)] text-xl text-white">Smart Filters</h2>
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-accent-500 hover:text-white"
-              >
-                Reset
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={exportCsv}
+                  disabled={filteredTransactions.length === 0}
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-accent-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Export CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-accent-500 hover:text-white"
+                >
+                  Reset
+                </button>
+              </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
@@ -337,4 +374,3 @@ function TransactionEditRow({
     </div>
   );
 }
-
