@@ -6,18 +6,23 @@ import AuthGuard from "@/components/AuthGuard";
 import StatCard from "@/components/StatCard";
 import { apiFetch } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { Transaction, TransactionsResponse } from "@/lib/types";
+import { Budget, BudgetsResponse, Transaction, TransactionsResponse } from "@/lib/types";
 
 export default function DashboardPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const fetchTransactions = async () => {
+    const fetchData = async () => {
       try {
-        const data = await apiFetch<TransactionsResponse>("/transactions");
-        setTransactions(data.transactions);
+        const [transactionData, budgetData] = await Promise.all([
+          apiFetch<TransactionsResponse>("/transactions"),
+          apiFetch<BudgetsResponse>("/budgets"),
+        ]);
+        setTransactions(transactionData.transactions);
+        setBudgets(budgetData.budgets);
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : "Failed to load dashboard");
       } finally {
@@ -25,7 +30,7 @@ export default function DashboardPage() {
       }
     };
 
-    fetchTransactions();
+    fetchData();
   }, []);
 
   const sortedTransactions = useMemo(
@@ -97,14 +102,66 @@ export default function DashboardPage() {
     }));
   }, [transactions]);
 
+  const budgetAlerts = useMemo(() => {
+    return budgets
+      .map((budget) => {
+        const spent = transactions
+          .filter((transaction) => {
+            if (transaction.type !== "expense") {
+              return false;
+            }
+            const transactionDate = new Date(transaction.date);
+            return (
+              transaction.category.toLowerCase() === budget.category.toLowerCase() &&
+              transactionDate.getMonth() + 1 === budget.month &&
+              transactionDate.getFullYear() === budget.year
+            );
+          })
+          .reduce((total, transaction) => total + transaction.amount, 0);
+
+        const progress = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
+        return {
+          ...budget,
+          spent,
+          progress,
+          remaining: budget.amount - spent,
+          status: progress >= 100 ? "critical" : progress >= 80 ? "warning" : "healthy",
+        };
+      })
+      .filter((budget) => budget.status !== "healthy")
+      .sort((a, b) => b.progress - a.progress);
+  }, [budgets, transactions]);
+
   return (
     <AuthGuard>
       <AppShell>
         <section className="space-y-6">
           <div className="space-y-2">
-            <h1 className="font-[var(--font-heading)] text-3xl font-bold text-white">Financial Overview</h1>
+            <h1 className="font-[var(--font-heading)] text-3xl text-white">Financial Overview</h1>
             <p className="text-slate-400">A quick snapshot of your spending and earning momentum.</p>
           </div>
+
+          {budgetAlerts.length > 0 ? (
+            <section className="space-y-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100 shadow-glow">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-[var(--font-heading)] text-lg">Budget Alerts</h2>
+                <span className="text-xs uppercase tracking-wide text-amber-200">{budgetAlerts.length} attention items</span>
+              </div>
+              <div className="space-y-2">
+                {budgetAlerts.map((budget) => (
+                  <div key={budget.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-bg/70 px-3 py-2">
+                    <div>
+                      <p className="font-semibold text-white">{budget.category}</p>
+                      <p className="text-sm text-amber-100/80">{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)} used</p>
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${budget.status === "critical" ? "bg-rose-500/20 text-rose-100" : "bg-amber-500/20 text-amber-100"}`}>
+                      {budget.status === "critical" ? "Over Budget" : "At Risk"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <div className="grid gap-4 md:grid-cols-3">
             <StatCard label="Total Income" amount={summary.income} tone="income" />
@@ -132,7 +189,7 @@ export default function DashboardPage() {
           <section className="grid gap-4 lg:grid-cols-5">
             <article className="rounded-2xl border border-line bg-surface/90 p-5 shadow-glow lg:col-span-2">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-[var(--font-heading)] text-xl font-semibold text-white">Expense Mix</h2>
+                <h2 className="font-[var(--font-heading)] text-xl text-white">Expense Mix</h2>
                 <p className="text-xs text-slate-400">Top 5 categories</p>
               </div>
 
@@ -157,7 +214,7 @@ export default function DashboardPage() {
 
             <section className="rounded-2xl border border-line bg-surface/90 p-5 shadow-glow lg:col-span-3">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-[var(--font-heading)] text-xl font-semibold text-white">Recent Transactions</h2>
+                <h2 className="font-[var(--font-heading)] text-xl text-white">Recent Transactions</h2>
                 <p className="text-sm text-slate-400">{transactions.length} records</p>
               </div>
 
@@ -206,3 +263,4 @@ export default function DashboardPage() {
     </AuthGuard>
   );
 }
+
