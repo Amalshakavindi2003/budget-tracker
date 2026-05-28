@@ -80,6 +80,61 @@ export default function DashboardPage() {
     };
   }, [transactions]);
 
+  const previousMonthStats = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const previousMonthDate = new Date(currentYear, currentMonth - 1, 1);
+    const previousMonth = previousMonthDate.getMonth();
+    const previousYear = previousMonthDate.getFullYear();
+
+    const previousMonthTransactions = transactions.filter((transaction) => {
+      const txDate = new Date(transaction.date);
+      return txDate.getMonth() === previousMonth && txDate.getFullYear() === previousYear;
+    });
+
+    const previousIncome = previousMonthTransactions
+      .filter((transaction) => transaction.type === "income")
+      .reduce((total, transaction) => total + transaction.amount, 0);
+
+    const previousExpense = previousMonthTransactions
+      .filter((transaction) => transaction.type === "expense")
+      .reduce((total, transaction) => total + transaction.amount, 0);
+
+    return {
+      transactionCount: previousMonthTransactions.length,
+      income: previousIncome,
+      expense: previousExpense,
+      balance: previousIncome - previousExpense,
+    };
+  }, [transactions]);
+
+  const comparisonSummary = useMemo(() => {
+    const delta = (current: number, previous: number) => current - previous;
+    const percentChange = (current: number, previous: number) => {
+      if (previous === 0) {
+        return current === 0 ? 0 : 100;
+      }
+
+      return ((current - previous) / previous) * 100;
+    };
+
+    return {
+      income: {
+        delta: delta(monthlyStats.monthIncome, previousMonthStats.income),
+        percent: percentChange(monthlyStats.monthIncome, previousMonthStats.income),
+      },
+      expense: {
+        delta: delta(monthlyStats.monthExpense, previousMonthStats.expense),
+        percent: percentChange(monthlyStats.monthExpense, previousMonthStats.expense),
+      },
+      balance: {
+        delta: delta(monthlyStats.monthNet, previousMonthStats.balance),
+        percent: percentChange(monthlyStats.monthNet, previousMonthStats.balance),
+      },
+    };
+  }, [monthlyStats, previousMonthStats]);
+
   const categoryExpenseBreakdown = useMemo(() => {
     const categoryTotals = transactions
       .filter((transaction) => transaction.type === "expense")
@@ -132,6 +187,8 @@ export default function DashboardPage() {
       .sort((a, b) => b.progress - a.progress);
   }, [budgets, transactions]);
 
+  const deltaTone = (value: number): string => (value > 0 ? "text-emerald-300" : value < 0 ? "text-rose-300" : "text-slate-300");
+
   return (
     <AuthGuard>
       <AppShell>
@@ -144,7 +201,7 @@ export default function DashboardPage() {
           {budgetAlerts.length > 0 ? (
             <section className="space-y-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-100 shadow-glow">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="font-[var(--font-heading)] text-lg">Budget Alerts</h2>
+                <h2 className="font-[var(--font-heading)] text-lg text-white">Budget Alerts</h2>
                 <span className="text-xs uppercase tracking-wide text-amber-200">{budgetAlerts.length} attention items</span>
               </div>
               <div className="space-y-2">
@@ -152,7 +209,9 @@ export default function DashboardPage() {
                   <div key={budget.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-bg/70 px-3 py-2">
                     <div>
                       <p className="font-semibold text-white">{budget.category}</p>
-                      <p className="text-sm text-amber-100/80">{formatCurrency(budget.spent)} of {formatCurrency(budget.amount)} used</p>
+                      <p className="text-sm text-amber-100/80">
+                        {formatCurrency(budget.spent)} of {formatCurrency(budget.amount)} used
+                      </p>
                     </div>
                     <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${budget.status === "critical" ? "bg-rose-500/20 text-rose-100" : "bg-amber-500/20 text-amber-100"}`}>
                       {budget.status === "critical" ? "Over Budget" : "At Risk"}
@@ -168,6 +227,43 @@ export default function DashboardPage() {
             <StatCard label="Total Expenses" amount={summary.expenses} tone="expense" />
             <StatCard label="Current Balance" amount={summary.balance} tone="balance" />
           </div>
+
+          <section className="rounded-2xl border border-line bg-surface/90 p-5 shadow-glow">
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-[var(--font-heading)] text-xl text-white">Month-over-Month Comparison</h2>
+                <p className="text-sm text-slate-400">Current month compared to the previous month</p>
+              </div>
+              <span className="text-sm text-slate-400">{monthlyStats.transactionCount} records this month</span>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <article className="rounded-2xl border border-line bg-surfaceSoft p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-400">Income Change</p>
+                <p className={`mt-2 text-2xl font-semibold ${deltaTone(comparisonSummary.income.delta)}`}>
+                  {comparisonSummary.income.delta >= 0 ? "+" : ""}
+                  {formatCurrency(comparisonSummary.income.delta)}
+                </p>
+                <p className="mt-1 text-sm text-slate-400">{comparisonSummary.income.percent.toFixed(1)}% vs last month</p>
+              </article>
+              <article className="rounded-2xl border border-line bg-surfaceSoft p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-400">Expense Change</p>
+                <p className={`mt-2 text-2xl font-semibold ${deltaTone(comparisonSummary.expense.delta * -1)}`}>
+                  {comparisonSummary.expense.delta >= 0 ? "+" : ""}
+                  {formatCurrency(comparisonSummary.expense.delta)}
+                </p>
+                <p className="mt-1 text-sm text-slate-400">{comparisonSummary.expense.percent.toFixed(1)}% vs last month</p>
+              </article>
+              <article className="rounded-2xl border border-line bg-surfaceSoft p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-400">Net Change</p>
+                <p className={`mt-2 text-2xl font-semibold ${deltaTone(comparisonSummary.balance.delta)}`}>
+                  {comparisonSummary.balance.delta >= 0 ? "+" : ""}
+                  {formatCurrency(comparisonSummary.balance.delta)}
+                </p>
+                <p className="mt-1 text-sm text-slate-400">{comparisonSummary.balance.percent.toFixed(1)}% vs last month</p>
+              </article>
+            </div>
+          </section>
 
           <section className="grid gap-4 md:grid-cols-3">
             <article className="rounded-2xl border border-line bg-surface/90 p-4 shadow-glow">
@@ -263,4 +359,3 @@ export default function DashboardPage() {
     </AuthGuard>
   );
 }
-
