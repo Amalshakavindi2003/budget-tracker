@@ -218,3 +218,61 @@ export const deleteTransaction = async (
   }
 };
 
+export const importTransactions = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    // Expect rows array in the body: [{ Title, Category, Type, Amount, Date }]
+    const { rows } = req.body as { rows?: Array<Record<string, any>> };
+
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+      res.status(400).json({ message: "No rows provided" });
+      return;
+    }
+
+    const prepared = rows
+      .map((r) => {
+        const title = String(r.Title || r.title || "").trim();
+        const category = String(r.Category || r.category || "").trim();
+        const type = String((r.Type || r.type || "expense")).trim().toLowerCase();
+        const amount = Number(r.Amount ?? r.amount);
+        const dateVal = r.Date || r.date || new Date().toISOString();
+        const date = new Date(String(dateVal));
+
+        if (!title || !category || (type !== "income" && type !== "expense") || !Number.isFinite(amount) || Number.isNaN(date.getTime())) {
+          return null;
+        }
+
+        return {
+          title,
+          category,
+          type,
+          amount,
+          date,
+          userId,
+        };
+      })
+      .filter(Boolean) as Array<any>;
+
+    if (prepared.length === 0) {
+      res.status(400).json({ message: "No valid rows to import" });
+      return;
+    }
+
+    // Use createMany for bulk insert
+    await prisma.transaction.createMany({ data: prepared });
+
+    res.status(201).json({ message: `Imported ${prepared.length} transactions` });
+  } catch (error) {
+    console.error("Import transactions error:", error);
+    res.status(500).json({ message: "Failed to import transactions" });
+  }
+};

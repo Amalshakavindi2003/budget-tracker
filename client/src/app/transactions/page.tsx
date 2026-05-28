@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppShell from "@/components/AppShell";
 import AuthGuard from "@/components/AuthGuard";
 import TransactionForm from "@/components/TransactionForm";
@@ -20,6 +20,15 @@ export default function TransactionsPage() {
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [savingTransactionId, setSavingTransactionId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
+
+  // CSV import states
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [csvPreviewRows, setCsvPreviewRows] = useState<Array<Record<string, string>>>([]);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTransactions = async () => {
@@ -156,6 +165,106 @@ export default function TransactionsPage() {
     }
   };
 
+  // CSV parsing helpers
+  const parseCsvText = (text: string) => {
+    const rows: string[] = text.split(/\r?\n/).filter((r) => r.trim() !== "");
+    if (rows.length === 0) return { headers: [], data: [] };
+
+    const parseLine = (line: string) => {
+      const result: string[] = [];
+      let current = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++; // skip escaped quote
+          } else {
+            inQuotes = !inQuotes;
+          }
+          continue;
+        }
+        if (char === "," && !inQuotes) {
+          result.push(current);
+          current = "";
+          continue;
+        }
+        current += char;
+      }
+      result.push(current);
+      return result.map((c) => c.trim());
+    };
+
+    const headerLine = rows[0];
+    const headers = parseLine(headerLine).map((h) => h.replace(/"/g, "").trim());
+    const data = rows.slice(1).map((r) => {
+      const values = parseLine(r);
+      const obj: Record<string, string> = {};
+      headers.forEach((h, idx) => {
+        obj[h] = values[idx] ?? "";
+      });
+      return obj;
+    });
+
+    return { headers, data } as { headers: string[]; data: Array<Record<string, string>> };
+  };
+
+  const onFileSelected = async (file?: File) => {
+    setImportError(null);
+    setImportResult(null);
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = parseCsvText(text);
+      setCsvHeaders(parsed.headers);
+      setCsvPreviewRows(parsed.data.slice(0, 200));
+      setShowPreview(true);
+    } catch (err) {
+      setImportError("Failed to parse CSV file");
+    }
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
+
+  const confirmImport = async () => {
+    if (csvPreviewRows.length === 0) return;
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+
+    try {
+      // send full CSV data by reassembling -- in this implementation we only have preview rows stored,
+      // so read file again from input if present
+      const input = fileInputRef.current;
+      let fullRows = csvPreviewRows;
+      if (input && input.files && input.files[0]) {
+        const text = await input.files[0].text();
+        const parsed = parseCsvText(text);
+        fullRows = parsed.data;
+      }
+
+      const response = await apiFetch<{ message: string }>("/transactions/import", {
+        method: "POST",
+        body: JSON.stringify({ rows: fullRows }),
+      });
+
+      setImportResult(response.message ?? "Imported");
+
+      // Refresh transactions after import
+      const refreshed = await apiFetch<TransactionsResponse>("/transactions");
+      setTransactions(refreshed.transactions);
+      setShowPreview(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <AuthGuard>
       <AppShell>
@@ -179,6 +288,14 @@ export default function TransactionsPage() {
                 >
                   Export CSV
                 </button>
+                <button
+                  type="button"
+                  onClick={triggerFileInput}
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-accent-500 hover:text-white"
+                >
+                  Import CSV
+                </button>
+                <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => onFileSelected(e.target.files?.[0])} />
                 <button
                   type="button"
                   onClick={clearFilters}
@@ -250,6 +367,42 @@ export default function TransactionsPage() {
               </div>
             </div>
           </section>
+
+          {showPreview ? (
+            <section className="rounded-2xl border border-line bg-surface/80 p-5 shadow-glow">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-[var(--font-heading)] text-lg text-white">CSV Import Preview</h2>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowPreview(false)} className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-slate-300">Cancel</button>
+                  <button onClick={confirmImport} disabled={importing} className="rounded-lg bg-accent-600 px-3 py-1.5 text-xs font-semibold text-white">{importing ? 'Importing...' : 'Confirm Import'}</button>
+                </div>
+              </div>
+
+              {importError ? <p className="text-rose-300">{importError}</p> : null}
+              {importResult ? <p className="text-emerald-300">{importResult}</p> : null}
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-slate-400">
+                      {csvHeaders.map((h) => (
+                        <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvPreviewRows.slice(0, 200).map((row, idx) => (
+                      <tr key={idx} className="border-t border-line">
+                        {csvHeaders.map((h) => (
+                          <td key={h} className="px-3 py-2">{row[h] ?? ""}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
 
           <section className="rounded-2xl border border-line bg-surface/90 p-5 shadow-glow">
             <div className="mb-4 flex items-center justify-between">
