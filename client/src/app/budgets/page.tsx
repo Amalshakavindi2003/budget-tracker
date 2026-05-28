@@ -37,7 +37,7 @@ export default function BudgetsPage() {
   }, []);
 
   const budgetInsights = useMemo(() => {
-    const rows = budgets.map((budget) => {
+    return budgets.map((budget) => {
       const spent = transactions
         .filter((transaction) => {
           if (transaction.type !== "expense") {
@@ -55,13 +55,7 @@ export default function BudgetsPage() {
         .reduce((total, transaction) => total + transaction.amount, 0);
 
       const progress = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
-      let status: BudgetStatus = "healthy";
-
-      if (progress >= 100) {
-        status = "critical";
-      } else if (progress >= 80) {
-        status = "warning";
-      }
+      const status: BudgetStatus = progress >= 100 ? "critical" : progress >= 80 ? "warning" : "healthy";
 
       return {
         ...budget,
@@ -71,9 +65,7 @@ export default function BudgetsPage() {
         remaining: budget.amount - spent,
         status,
       };
-    });
-
-    return rows.sort((a, b) => b.rawProgress - a.rawProgress);
+    }).sort((a, b) => b.rawProgress - a.rawProgress);
   }, [budgets, transactions]);
 
   const alertSummary = useMemo(() => {
@@ -105,7 +97,7 @@ export default function BudgetsPage() {
       <AppShell>
         <section className="space-y-6">
           <div className="space-y-2">
-            <h1 className="font-[var(--font-heading)] text-3xl font-bold text-white">Budgets</h1>
+            <h1 className="font-[var(--font-heading)] text-3xl text-white">Budgets</h1>
             <p className="text-slate-400">Set category targets and track real-time progress against spending.</p>
           </div>
 
@@ -128,7 +120,7 @@ export default function BudgetsPage() {
 
           <section className="rounded-2xl border border-line bg-surface/90 p-5 shadow-glow">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-[var(--font-heading)] text-xl font-semibold text-white">Budget Limits</h2>
+              <h2 className="font-[var(--font-heading)] text-xl text-white">Budget Limits</h2>
               <span className="text-sm text-slate-400">{budgets.length} categories</span>
             </div>
 
@@ -189,3 +181,4 @@ export default function BudgetsPage() {
     </AuthGuard>
   );
 }
+
