@@ -8,6 +8,8 @@ import { apiFetch } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { Transaction, TransactionsResponse } from "@/lib/types";
 
+type CsvPreviewRow = { row: Record<string, string>; valid: boolean; errors: string[] };
+
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +25,7 @@ export default function TransactionsPage() {
 
   // CSV import states
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [csvPreviewRows, setCsvPreviewRows] = useState<Array<Record<string, string>>>([]);
+  const [csvPreviewRows, setCsvPreviewRows] = useState<CsvPreviewRow[]>([]);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -210,6 +212,25 @@ export default function TransactionsPage() {
     return { headers, data } as { headers: string[]; data: Array<Record<string, string>> };
   };
 
+  const validateCsvRow = (row: Record<string, string>) => {
+    const errors: string[] = [];
+    const title = (row.Title || row.title || "").trim();
+    const category = (row.Category || row.category || "").trim();
+    const type = ((row.Type || row.type || "").trim() || "expense").toLowerCase();
+    const amountRaw = (row.Amount || row.amount || "").trim();
+    const amount = Number(amountRaw);
+    const dateRaw = (row.Date || row.date || "").trim();
+    const date = dateRaw ? new Date(dateRaw) : new Date();
+
+    if (!title) errors.push("Missing title");
+    if (!category) errors.push("Missing category");
+    if (type !== "income" && type !== "expense") errors.push("Type must be income or expense");
+    if (!amountRaw || !Number.isFinite(amount)) errors.push("Amount must be a number");
+    if (dateRaw && Number.isNaN(date.getTime())) errors.push("Invalid date");
+
+    return errors;
+  };
+
   const onFileSelected = async (file?: File) => {
     setImportError(null);
     setImportResult(null);
@@ -218,7 +239,13 @@ export default function TransactionsPage() {
       const text = await file.text();
       const parsed = parseCsvText(text);
       setCsvHeaders(parsed.headers);
-      setCsvPreviewRows(parsed.data.slice(0, 200));
+
+      const preview = parsed.data.slice(0, 200).map((r) => {
+        const errors = validateCsvRow(r);
+        return { row: r, valid: errors.length === 0, errors } as CsvPreviewRow;
+      });
+
+      setCsvPreviewRows(preview);
       setShowPreview(true);
     } catch (err) {
       setImportError("Failed to parse CSV file");
@@ -236,19 +263,18 @@ export default function TransactionsPage() {
     setImportResult(null);
 
     try {
-      // send full CSV data by reassembling -- in this implementation we only have preview rows stored,
-      // so read file again from input if present
+      // read file again to get full rows
       const input = fileInputRef.current;
-      let fullRows = csvPreviewRows;
+      let fullRowsData: Array<Record<string, string>> = csvPreviewRows.map((p) => p.row);
       if (input && input.files && input.files[0]) {
         const text = await input.files[0].text();
         const parsed = parseCsvText(text);
-        fullRows = parsed.data;
+        fullRowsData = parsed.data;
       }
 
       const response = await apiFetch<{ message: string }>("/transactions/import", {
         method: "POST",
-        body: JSON.stringify({ rows: fullRows }),
+        body: JSON.stringify({ rows: fullRowsData }),
       });
 
       setImportResult(response.message ?? "Imported");
@@ -264,6 +290,8 @@ export default function TransactionsPage() {
       setImporting(false);
     }
   };
+
+  const invalidCount = csvPreviewRows.filter((r) => !r.valid).length;
 
   return (
     <AuthGuard>
@@ -373,6 +401,7 @@ export default function TransactionsPage() {
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-[var(--font-heading)] text-lg text-white">CSV Import Preview</h2>
                 <div className="flex items-center gap-2">
+                  <div className="text-sm text-slate-400">{csvPreviewRows.length} rows (Invalid: {invalidCount})</div>
                   <button onClick={() => setShowPreview(false)} className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-slate-300">Cancel</button>
                   <button onClick={confirmImport} disabled={importing} className="rounded-lg bg-accent-600 px-3 py-1.5 text-xs font-semibold text-white">{importing ? 'Importing...' : 'Confirm Import'}</button>
                 </div>
@@ -391,16 +420,20 @@ export default function TransactionsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {csvPreviewRows.slice(0, 200).map((row, idx) => (
-                      <tr key={idx} className="border-t border-line">
+                    {csvPreviewRows.slice(0, 200).map((preview, idx) => (
+                      <tr key={idx} className={`border-t border-line ${preview.valid ? "" : "bg-rose-900/10"}`}>
                         {csvHeaders.map((h) => (
-                          <td key={h} className="px-3 py-2">{row[h] ?? ""}</td>
+                          <td key={h} className="px-3 py-2">{preview.row[h] ?? ""}</td>
                         ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+
+              {invalidCount > 0 ? (
+                <div className="mt-3 text-sm text-rose-200">Some rows look invalid. Fix the CSV or remove invalid rows before importing.</div>
+              ) : null}
             </section>
           ) : null}
 
@@ -426,7 +459,7 @@ export default function TransactionsPage() {
                   return (
                     <article
                       key={transaction.id}
-                      className="flex flex-col gap-3 rounded-xl border border-line bg-surfaceSoft px-4 py-3"
+                      className="flex flex-col gap-3 rounded-xl border border-line bg-surfaceSoft px-4 py-3 transition hover:shadow-md hover:bg-surface/75"
                     >
                       {isEditing ? (
                         <TransactionEditRow
