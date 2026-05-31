@@ -1,6 +1,8 @@
 import { getToken } from "./auth";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
+  ? `${process.env.NEXT_PUBLIC_API_URL}/api`
+  : "http://localhost:5000/api";
 
 interface ApiOptions extends RequestInit {
   auth?: boolean;
